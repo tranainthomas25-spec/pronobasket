@@ -45,11 +45,15 @@
   }
   async function tsdb(L, st, prog) {
     const lg = st[L.c] = st[L.c] || { r: {}, e: {} };
-    if (!lg.s || Date.now() - (lg.ts || 0) > 7 * 864e5) {
-      const j = await getJ(`https://www.thesportsdb.com/api/v1/json/123/lookupleague.php?id=${L.id}`);
-      const s = ((j.leagues || [])[0] || {}).strCurrentSeason;
+    if (!lg.s || lg.v !== 2 || Date.now() - (lg.ts || 0) > 864e5) {
+      // La saison officielle de TheSportsDB est parfois fausse (EuroCup « 2026 » au lieu de « 2026-2027 ») :
+      // on prend celle des derniers matchs joués, sinon celle des prochains, sinon la saison officielle.
+      const saison = async u => { try { const e = (await getJ(u)).events || []; return e.length ? e[e.length - 1].strSeason : null; } catch (x) { return null; } };
+      let s = await saison(`https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id=${L.id}`);
+      if (!s) { await pause(2500); s = await saison(`https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id=${L.id}`); }
+      if (!s) { await pause(2500); const j = await getJ(`https://www.thesportsdb.com/api/v1/json/123/lookupleague.php?id=${L.id}`); s = ((j.leagues || [])[0] || {}).strCurrentSeason; }
       if (s && s !== lg.s) { lg.s = s; lg.r = {}; lg.e = {}; }
-      lg.ts = Date.now(); await pause(2500);
+      lg.ts = Date.now(); lg.v = 2; await pause(2500);
     }
     for (let r = 1; r <= 60; r++) {
       if (lg.r[r] === 2) continue;   // journée terminée, déjà gardée
@@ -85,7 +89,7 @@
         try { await espn(L, ETAT); ETAT['t_' + L.c] = Date.now(); ecrire(ETAT); quand && quand(); } catch (e) { }
       }
       for (const L of LIGUES.filter(l => l.src === 'tsdb')) {
-        if (!force && ETAT['t_' + L.c] && Date.now() - ETAT['t_' + L.c] < 3 * 3600e3) continue;
+        if (!force && ETAT['t_' + L.c] && (ETAT[L.c] || {}).v === 2 && Date.now() - ETAT['t_' + L.c] < 3 * 3600e3) continue;
         try { await tsdb(L, ETAT, () => { avance.fait++; }); ETAT['t_' + L.c] = Date.now(); ecrire(ETAT); quand && quand(); } catch (e) { }
       }
     } finally { occupe = false; }
