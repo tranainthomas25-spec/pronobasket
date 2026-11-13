@@ -8,6 +8,7 @@
     { c: 'ec', nom: 'EuroCup', src: 'tsdb', id: 4547, h: 3 },
     { c: 'bcl', nom: 'Champions League (basket)', src: 'tsdb', id: 4548, h: 3 },
     { c: 'lnb', nom: 'Betclic Élite (France)', src: 'tsdb', id: 4423, h: 3 },
+    { c: 'bbl', nom: 'BBL (Allemagne)', src: 'tsdb', id: 4441, h: 3 },
     { c: 'acb', nom: 'Liga ACB (Espagne)', src: 'tsdb', id: 4408, h: 3 },
     { c: 'lba', nom: 'Lega Basket (Italie)', src: 'tsdb', id: 4433, h: 3 },
     { c: 'gl', nom: 'G League', src: 'espn', slug: 'nba-development', debut: 11, h: 2.5 },
@@ -105,11 +106,23 @@
         if (!force && ETAT['t_' + L.c] && Date.now() - ETAT['t_' + L.c] < 10 * 60e3) continue;
         try { await espn(L, ETAT); ETAT['t_' + L.c] = Date.now(); ecrire(ETAT); quand && quand(); } catch (e) { }
       }
+      // Ligues européennes : un robot GitHub prépare toutes les données toutes les 2 heures (europe.json).
+      // On lit ce fichier (rapide) ; le téléchargement direct ne sert plus que de secours.
+      if (force || Date.now() - (ETAT.t_fichier || 0) > 10 * 60e3) {
+        try {
+          const f = await getJ('https://raw.githubusercontent.com/tranainthomas25-spec/pronobasket/main/data/europe.json?t=' + Date.now());
+          LIGUES.filter(l => l.src === 'tsdb').forEach(L => {
+            const lg = (f.l || {})[L.c];
+            if (lg && lg.s && lg.e && Object.keys(lg.e).length) { lg.v = 3; ETAT[L.c] = lg; ETAT['t_' + L.c] = lg.t || f.t; delete ETAT['e_' + L.c]; }
+          });
+          ETAT.t_fichier = Date.now(); ecrire(ETAT); quand && quand();
+        } catch (e) { }
+      }
       const eu = LIGUES.filter(l => l.src === 'tsdb').filter(L => {
         const lg = ETAT[L.c] || {};
         if (lg.v !== 3) return true;
         if (Date.now() - (ETAT['e_' + L.c] || 0) < 2 * 60e3) return false;                       // échec récent : on patiente
-        return force || !ETAT['t_' + L.c] || Date.now() - ETAT['t_' + L.c] > 3 * 3600e3;
+        return !ETAT['t_' + L.c] || Date.now() - ETAT['t_' + L.c] > 4 * 3600e3;
       });
       for (const L of eu) {
         enCours = L.nom; quand && quand();
