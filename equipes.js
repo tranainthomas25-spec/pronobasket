@@ -43,56 +43,85 @@
       if (mo < courant) lg.m[mo] = 1;
     }
   }
-  async function tsdb(L, st, prog) {
+  // TheSportsDB (clé gratuite) bloque au-delà d'environ 10 demandes par minute : on espace les appels de 6,5 s
+  // et, si on est bloqué, on attend une minute avant de réessayer.
+  let dernier = 0;
+  async function tsdbJ(u) {
+    for (let essai = 0; essai < 2; essai++) {
+      const att = dernier + 6500 - Date.now(); if (att > 0) await pause(att);
+      dernier = Date.now();
+      try { return await getJ('https://www.thesportsdb.com/api/v1/json/123/' + u); }
+      catch (e) { if (essai === 0) await pause(65000); }
+    }
+    throw new Error('tsdb');
+  }
+  function garder(lg, evs) {
+    let joues = 0;
+    evs.forEach(e => {
+      const ok = e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== '';
+      if (ok) joues++;
+      const iso = e.strTimestamp ? (/Z|\+/.test(e.strTimestamp) ? e.strTimestamp : e.strTimestamp + 'Z') : e.dateEvent + 'T' + (e.strTime || '18:00:00') + 'Z';
+      lg.e[e.idEvent] = [iso, ok ? 'post' : 'pre', e.strHomeTeam, e.strAwayTeam, ok ? +e.intHomeScore : null, ok ? +e.intAwayScore : null, [], [], '', null];
+    });
+    return joues;
+  }
+  async function journee(L, lg, r) {
+    const j = await tsdbJ(`eventsround.php?id=${L.id}&r=${r}&s=${encodeURIComponent(lg.s)}`);
+    const evs = j.events || [];
+    const joues = garder(lg, evs);
+    lg.r[r] = evs.length && joues === evs.length ? 2 : evs.length ? 1 : 0;
+  }
+  // Étape 1 : saison + journée en cours et suivante (les matchs du jour s'affichent tout de suite).
+  async function tsdbJour(L, st) {
     const lg = st[L.c] = st[L.c] || { r: {}, e: {} };
-    if (!lg.s || lg.v !== 2 || Date.now() - (lg.ts || 0) > 864e5) {
-      // La saison officielle de TheSportsDB est parfois fausse (EuroCup « 2026 » au lieu de « 2026-2027 ») :
-      // on prend celle des derniers matchs joués, sinon celle des prochains, sinon la saison officielle.
-      const saison = async u => { try { const e = (await getJ(u)).events || []; return e.length ? e[e.length - 1].strSeason : null; } catch (x) { return null; } };
-      let s = await saison(`https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id=${L.id}`);
-      if (!s) { await pause(2500); s = await saison(`https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id=${L.id}`); }
-      if (!s) { await pause(2500); const j = await getJ(`https://www.thesportsdb.com/api/v1/json/123/lookupleague.php?id=${L.id}`); s = ((j.leagues || [])[0] || {}).strCurrentSeason; }
-      if (s && s !== lg.s) { lg.s = s; lg.r = {}; lg.e = {}; }
-      lg.ts = Date.now(); lg.v = 2; await pause(2500);
+    // La saison officielle de TheSportsDB est parfois fausse (EuroCup « 2026 » au lieu de « 2026-2027 ») :
+    // on prend celle des derniers matchs joués (ou des prochains).
+    let ev = null;
+    try { ev = ((await tsdbJ(`eventspastleague.php?id=${L.id}`)).events || []).slice(-1)[0]; } catch (e) { }
+    if (!ev) ev = ((await tsdbJ(`eventsnextleague.php?id=${L.id}`)).events || [])[0];
+    if (!ev) return;
+    if (ev.strSeason && ev.strSeason !== lg.s) { lg.s = ev.strSeason; lg.r = {}; lg.e = {}; }
+    lg.v = 3;
+    const cur = +ev.intRound || 1; lg.cur = cur;
+    await journee(L, lg, cur);
+    await journee(L, lg, cur + 1);
+  }
+  // Étape 2 : l'historique, de la journée la plus récente à la plus ancienne (gardé au fur et à mesure).
+  async function tsdbHisto(L, st, quand) {
+    const lg = st[L.c]; if (!lg || !lg.cur) return true;
+    for (let r = lg.cur - 1; r >= 1; r--) {
+      if (lg.r[r] === 2) continue;
+      await journee(L, lg, r); ecrire(st); quand && quand();
     }
-    for (let r = 1; r <= 60; r++) {
-      if (lg.r[r] === 2) continue;   // journée terminée, déjà gardée
-      let j = null;
-      for (let essai = 0; essai < 3 && !j; essai++) {
-        try { j = await getJ(`https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id=${L.id}&r=${r}&s=${encodeURIComponent(lg.s)}`); }
-        catch (e) { await pause(20000); }
-      }
-      if (!j) throw new Error('tsdb');
-      prog && prog();
-      await pause(2500);
-      const evs = j.events || [];
-      if (!evs.length) { if (r > 3 && !Object.keys(lg.r).some(k => +k > r)) break; continue; }
-      let joues = 0;
-      evs.forEach(e => {
-        const ok = e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== '';
-        if (ok) joues++;
-        const iso = e.strTimestamp ? (/Z|\+/.test(e.strTimestamp) ? e.strTimestamp : e.strTimestamp + 'Z') : e.dateEvent + 'T' + (e.strTime || '18:00:00') + 'Z';
-        lg.e[e.idEvent] = [iso, ok ? 'post' : 'pre', e.strHomeTeam, e.strAwayTeam, ok ? +e.intHomeScore : null, ok ? +e.intAwayScore : null, [], [], '', null];
-      });
-      lg.r[r] = joues === evs.length ? 2 : 1;
-      if (!joues) break;   // première journée encore à jouer : c'est la prochaine, on s'arrête
-    }
+    return true;
   }
 
-  let ETAT = lire(), occupe = false, avance = { fait: 0 };
+  let ETAT = lire(), occupe = false, enCours = '';
   async function telecharger(force, quand) {
     if (occupe) return; occupe = true;
     try {
-      // ESPN d'abord (rapide), puis TheSportsDB (lent : limite de requêtes)
+      // ESPN d'abord (rapide), puis TheSportsDB (lent : limite de demandes)
       for (const L of LIGUES.filter(l => l.src === 'espn')) {
         if (!force && ETAT['t_' + L.c] && Date.now() - ETAT['t_' + L.c] < 10 * 60e3) continue;
         try { await espn(L, ETAT); ETAT['t_' + L.c] = Date.now(); ecrire(ETAT); quand && quand(); } catch (e) { }
       }
-      for (const L of LIGUES.filter(l => l.src === 'tsdb')) {
-        if (!force && ETAT['t_' + L.c] && (ETAT[L.c] || {}).v === 2 && Date.now() - ETAT['t_' + L.c] < 3 * 3600e3) continue;
-        try { await tsdb(L, ETAT, () => { avance.fait++; }); ETAT['t_' + L.c] = Date.now(); ecrire(ETAT); quand && quand(); } catch (e) { }
+      const eu = LIGUES.filter(l => l.src === 'tsdb').filter(L => {
+        const lg = ETAT[L.c] || {};
+        if (lg.v !== 3) return true;
+        if (Date.now() - (ETAT['e_' + L.c] || 0) < 2 * 60e3) return false;                       // échec récent : on patiente
+        return force || !ETAT['t_' + L.c] || Date.now() - ETAT['t_' + L.c] > 3 * 3600e3;
+      });
+      for (const L of eu) {
+        enCours = L.nom; quand && quand();
+        try { await tsdbJour(L, ETAT); ecrire(ETAT); quand && quand(); } catch (e) { ETAT['e_' + L.c] = Date.now(); }
       }
-    } finally { occupe = false; }
+      for (const L of eu) {
+        if (ETAT['e_' + L.c] && Date.now() - ETAT['e_' + L.c] < 2 * 60e3) continue;
+        enCours = L.nom + ' (historique)'; quand && quand();
+        try { await tsdbHisto(L, ETAT, quand); ETAT['t_' + L.c] = Date.now(); delete ETAT['e_' + L.c]; ecrire(ETAT); quand && quand(); }
+        catch (e) { ETAT['e_' + L.c] = Date.now(); ecrire(ETAT); }
+      }
+    } finally { occupe = false; enCours = ''; }
   }
 
   /* ---------- Modèle ---------- */
@@ -172,10 +201,11 @@
       Object.keys(lg.e).forEach(id => {
         const x = lg.e[id], t = new Date(x[0]).getTime();
         if (t < a || t >= b) return;
-        out.push({ id: L.c + ':' + id, lig: L, x, date: x[0], etat: x[1], dom: x[2], ext: x[3], sd: x[4], se: x[5], detail: x[8], espnId: x[9], p: prono(L, x) });
+        const etat = x[1] === 'pre' && L.src === 'tsdb' && t < Date.now() ? 'in' : x[1];
+        out.push({ id: L.c + ':' + id, lig: L, x, date: x[0], etat, dom: x[2], ext: x[3], sd: x[4], se: x[5], detail: etat === 'in' && !x[8] ? 'En cours' : x[8], espnId: x[9], p: prono(L, x) });
       });
     });
     return out.sort((u, v) => u.date.localeCompare(v.date));
   }
-  window.EQ = { LIGUES, telecharger, matchs, phi, occupe: () => occupe, charge: () => LIGUES.filter(L => ETAT[L.c] && ETAT['t_' + L.c]).length };
+  window.EQ = { LIGUES, telecharger, matchs, phi, occupe: () => occupe, enCours: () => enCours, charge: () => LIGUES.filter(L => ETAT[L.c] && ETAT['t_' + L.c]).length };
 })();

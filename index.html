@@ -117,7 +117,7 @@ td.g{font:700 16px "Barlow Condensed",sans-serif;color:var(--gold2)}
   <button data-tab="joueurs"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Joueurs</button>
 </nav>
 <div class="veil hidden" id="veil"><div class="sheet" id="sheet"></div></div>
-<script src="equipes.js?v=2"></script>
+<script src="equipes.js?v=3"></script>
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -240,7 +240,7 @@ const ligne = (x, c, k) => { const p = x.p[c][k];
   <div class="d">${esc(x.j.eqAb)} vs ${esc(x.adv)} · ${heure(x.m.date)} · moy. ${x.j[c].toFixed(1).replace('.', ',')}</div><div class="co">joue si cote ≥ ${cote(p)}</div></div>`; };
 const ligneEq = (g, titre, p, sous) => `<div class="pl m" data-g="${esc(g.id)}"><div class="n">${titre}</div><div class="pc">${pc(p)}</div>
   <div class="d">${esc(g.dom)} – ${esc(g.ext)} · ${esc(g.lig.nom)} · ${heure(g.date)}${sous ? ' · ' + sous : ''}</div><div class="co">joue si cote ≥ ${cote(p)}</div></div>`;
-const etatEq = () => EQ.occupe() ? '<p class="note">⏳ Mise à jour des ligues européennes en cours (1 à 3 minutes la première fois)…</p>' : '';
+const etatEq = () => EQ.occupe() && EQ.enCours() ? `<p class="note">⏳ Chargement : ${esc(EQ.enCours())}… (les ligues européennes arrivent une par une, compte quelques minutes la première fois)</p>` : '';
 
 function vueTop(ev) {
   const gs = EQ.matchs(S.jour).filter(g => g.etat === 'pre');
