@@ -115,6 +115,7 @@
             const lg = (f.l || {})[L.c];
             if (lg && lg.s && lg.e && Object.keys(lg.e).length) { lg.v = 3; ETAT[L.c] = lg; ETAT['t_' + L.c] = lg.t || f.t; delete ETAT['e_' + L.c]; }
           });
+          if (f.j) ETAT.joueurs = f.j;
           ETAT.t_fichier = Date.now(); ecrire(ETAT); quand && quand();
         } catch (e) { }
       }
@@ -202,7 +203,8 @@
     // ligne « sûre » du total : ~80 % de chances
     const lSur = demi(mT - 0.84 * M.sigT), pSur = plus(mT, M.sigT, lSur);
     return { mD, mE, mm, mT, pD, pE: 1 - pD, totaux, fav, ecarts, totD: eqT(mD), totE: eqT(mE), quarts, mt, lSur, pSur,
-      faible: Math.min(d.n, e.n) < 5, nMin: Math.min(d.n, e.n) };
+      faible: Math.min(d.n, e.n) < 5, nMin: Math.min(d.n, e.n),
+      oD: e.def / M.Lm, oE: d.def / M.Lm };   // défense de l'adversaire (+ = encaisse plus que la moyenne)
   }
 
   /* Matchs d'une fenêtre (jour j : 08:00 heure locale → 08:00 le lendemain) avec leurs pronos */
@@ -220,5 +222,27 @@
     });
     return out.sort((u, v) => u.date.localeCompare(v.date));
   }
-  window.EQ = { LIGUES, telecharger, matchs, phi, occupe: () => occupe, enCours: () => enCours, charge: () => LIGUES.filter(L => ETAT[L.c] && ETAT['t_' + L.c]).length };
+  /* Joueurs des championnats hors NBA : on retrouve l'équipe par son nom (les sources n'écrivent pas les noms pareil) */
+  const STOP = new Set(['bc', 'kk', 'fc', 'sk', 'bk', 'cb', 'ac', 'as', 'basket', 'basketball', 'basketbol', 'baloncesto', 'basquet', 'pallacanestro',
+    'club', 'the', 'team', 'sport', 'sports', 'ldlc', 'meridianbet', 'mozzart', 'bet', 'aktor', 'rapyd', 'armani', 'ibi']);
+  const toks = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !STOP.has(w));
+  const proche = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
+  const score = (a, b) => { const B = toks(b); return toks(a).filter(x => B.some(y => proche(x, y))).length; };
+  const ALIAS = [[/canarias/i, 'tenerife'], [/spqr/i, 'roma basketball']];   // noms trop différents d'une source à l'autre
+  function equipeJ(liste, nom) {
+    const noms = [...new Set(liste.map(p => p.e))];
+    if (noms.includes(nom)) return nom;
+    for (const [re, cible] of ALIAS) if (re.test(nom)) { const t = noms.find(n => n.toLowerCase().includes(cible)); if (t) return t; }
+    let best = null, bs = 0, sec = 0;
+    noms.forEach(n => { const s = score(nom, n); if (s > bs) { sec = bs; bs = s; best = n; } else if (s > sec) sec = s; });
+    return bs >= 1 && bs > sec ? best : null;
+  }
+  function joueurs(g) {
+    const liste = (ETAT.joueurs || {})[g.lig.c]; if (!liste || !liste.length) return null;
+    const d = equipeJ(liste, g.dom), e = equipeJ(liste, g.ext);
+    if (!d && !e) return null;
+    return { dom: d ? liste.filter(p => p.e === d) : [], ext: e ? liste.filter(p => p.e === e) : [] };
+  }
+
+  window.EQ = { joueurs, LIGUES, telecharger, matchs, phi, occupe: () => occupe, enCours: () => enCours, charge: () => LIGUES.filter(L => ETAT[L.c] && ETAT['t_' + L.c]).length };
 })();

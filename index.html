@@ -117,7 +117,7 @@ td.g{font:700 16px "Barlow Condensed",sans-serif;color:var(--gold2)}
   <button data-tab="joueurs"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Joueurs</button>
 </nav>
 <div class="veil hidden" id="veil"><div class="sheet" id="sheet"></div></div>
-<script src="equipes.js?v=4"></script>
+<script src="equipes.js?v=5"></script>
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -143,7 +143,7 @@ const CAT = {
   ast: { nom: 'Passes', court: 'pd', ico: '🎯', paliers: [3, 5, 7, 9, 11, 13] }
 };
 
-let S = { jour: 0, tab: 'top', cat: 'pts', pal: 20, data: {}, lig: 'Toutes', okJ: false };
+let S = { jour: 0, tab: 'top', cat: 'pts', pal: 20, data: {}, lig: 'Toutes', ligJ: 'NBA', okJ: false };
 
 const jourUS = dec => {
   const d = new Date(Date.now() + dec * 864e5);
@@ -227,7 +227,33 @@ function joueursMatch(m) {
   });
   return out;
 }
-const palierSur = (x, c) => { let best = null; CAT[c].paliers.forEach(k => { if (x.p[c][k] >= M.SUR) best = k; }); return best; };
+const palierSur = (x, c) => { let best = null; (x.P || CAT)[c].paliers.forEach(k => { if (x.p[c][k] >= M.SUR) best = k; }); return best; };
+
+/* Championnats hors NBA : on marque moins (matchs de 40 min, rythme plus lent), donc paliers plus bas */
+const CATE = {
+  pts: Object.assign({}, CAT.pts, { paliers: [5, 8, 10, 12, 15, 18, 20, 25] }),
+  reb: Object.assign({}, CAT.reb, { paliers: [3, 4, 5, 6, 8, 10] }),
+  ast: Object.assign({}, CAT.ast, { paliers: [2, 3, 4, 5, 6, 8] })
+};
+const court = n => { const t = n.split(' '); return t.length > 1 ? t[0][0] + '. ' + t.slice(1).join(' ') : n; };
+function joueursEq(g) {
+  if (g.lig.c === 'nba') return [];
+  const J = EQ.joueurs(g); if (!J) return [];
+  const out = [];
+  [[J.dom, g.dom, g.ext, g.p ? g.p.oD : 0], [J.ext, g.ext, g.dom, g.p ? g.p.oE : 0]].forEach(([liste, eq, adv, d]) => {
+    liste.forEach(pj => {
+      if (pj.mj < 2 || pj.min < 12) return;
+      const j = { nom: pj.n, court: court(pj.n), eqAb: eq, mj: pj.mj, min: pj.min, pts: pj.pts, reb: pj.reb, ast: pj.ast };
+      const moy = {}, p = {};
+      Object.keys(CATE).forEach(c => {
+        moy[c] = j[c] * (1 + M.OPP[c] * (d || 0));
+        p[c] = {}; CATE[c].paliers.forEach(k => p[c][k] = pAuMoins(moy[c], c, k, j.mj));
+      });
+      out.push({ j, m: { id: g.id, date: g.date }, adv, moy, p, incertain: false, P: CATE, g });
+    });
+  });
+  return out;
+}
 
 /* ---------- Affichage ---------- */
 const chipsJour = () => `<div class="chips">${["Aujourd'hui (+ nuit)", 'Demain (+ nuit)'].map((t, i) => `<button class="chip${S.jour === i ? ' on' : ''}" data-jour="${i}">${t}</button>`).join('')}</div>`;
@@ -267,6 +293,17 @@ function vueTop(ev) {
     });
     h += '</div>';
   }
+  const tousE = filtreLig(gs).flatMap(joueursEq);
+  if (tousE.length) {
+    h += `<div class="card hero"><div class="tt">🌍 Les paris joueurs des autres championnats</div><div class="st">paliers adaptés : on marque moins qu'en NBA · le palier atteint au moins 3 fois sur 4</div>`;
+    Object.keys(CATE).forEach(c => {
+      const nb = {};   // au plus 2 joueurs par championnat, pour varier
+      const l = tousE.map(x => ({ x, k: palierSur(x, c) })).filter(o => o.k).sort((a, b) => b.k - a.k || b.x.p[c][b.k] - a.x.p[c][a.k])
+        .filter(o => (nb[o.x.g.lig.c] = (nb[o.x.g.lig.c] || 0) + 1) <= 2).slice(0, 6);
+      h += `<div class="sec">${CATE[c].ico} ${CATE[c].nom}</div>${l.map(o => ligne(o.x, c, o.k)).join('') || '<p class="note">Aucun joueur assez sûr.</p>'}`;
+    });
+    h += '</div>';
+  }
   if (!gs.length && !avenir.length) h += `<p class="empty">Pas de match à venir ce jour-là.<br>Regarde demain.</p>`;
   return h + `<p class="note">💡 Joue un pari seulement si la cote du bookmaker est au moins égale à la « cote ≥ » affichée, avec 1 à 2 % de ta bankroll.</p>`;
 }
@@ -293,7 +330,19 @@ function segCat(attr) { return `<div class="seg">${Object.keys(CAT).map(c => `<b
 function vueJoueurs(ev) {
   let h = chipsJour();
   const avenir = ev.filter(m => m.etat === 'pre');
-  if (!avenir.length || !S.okJ) return h + '<p class="empty">Aucun match NBA à venir ce jour-là.<br>Les paris joueurs ne concernent que la NBA.</p>';
+  // championnats qui ont des joueurs ce jour-là
+  const autres = {}; EQ.matchs(S.jour).filter(g => g.etat === 'pre').forEach(g => { const l = joueursEq(g); if (l.length) (autres[g.lig.nom] = autres[g.lig.nom] || []).push(...l); });
+  const ligs = (avenir.length && S.okJ ? ['NBA'] : []).concat(Object.keys(autres));
+  if (!ligs.length) return h + '<p class="empty">Aucun match à venir avec des stats joueurs ce jour-là.</p>';
+  if (!ligs.includes(S.ligJ)) S.ligJ = ligs[0];
+  if (ligs.length > 1) h += `<div class="chips">${ligs.map(n => `<button class="chip${S.ligJ === n ? ' on' : ''}" data-ligj="${esc(n)}">${esc(n)}</button>`).join('')}</div>`;
+  if (S.ligJ !== 'NBA') {
+    const c = S.cat; if (!CATE[c].paliers.includes(S.pal)) S.pal = CATE[c].paliers[2];
+    h += segCat('data-cat');
+    h += `<div class="chips">${CATE[c].paliers.map(k => `<button class="chip${S.pal === k ? ' on' : ''}" data-pal="${k}">${k}+ ${CATE[c].court}</button>`).join('')}</div>`;
+    const l = autres[S.ligJ].sort((a, b) => b.p[c][S.pal] - a.p[c][S.pal]).filter(x => x.p[c][S.pal] >= 0.2).slice(0, 40);
+    return h + `<div class="card"><div style="color:var(--muted);font-size:12.5px">Chance qu'il fasse au moins ${S.pal} ${CATE[c].nom.toLowerCase()} · ${esc(S.ligJ)}</div>${l.map(x => ligne(x, c, S.pal)).join('') || '<p class="note">Aucun joueur n\'a au moins 20 % de chances.</p>'}</div>`;
+  }
   const c = S.cat; if (!CAT[c].paliers.includes(S.pal)) S.pal = CAT[c].paliers[2];
   h += segCat('data-cat');
   h += `<div class="chips">${CAT[c].paliers.map(k => `<button class="chip${S.pal === k ? ' on' : ''}" data-pal="${k}">${k}+ ${CAT[c].court}</button>`).join('')}</div>`;
@@ -301,9 +350,9 @@ function vueJoueurs(ev) {
   h += `<div class="card"><div style="color:var(--muted);font-size:12.5px">Chance qu'il fasse au moins ${S.pal} ${CAT[c].nom.toLowerCase()} · matchs NBA à venir</div>${l.map(x => ligne(x, c, S.pal)).join('') || '<p class="note">Aucun joueur n\'a au moins 20 % de chances.</p>'}</div>`;
   return h;
 }
-function tableJoueurs(m) {
-  const js = joueursMatch(m);
-  const c = S.cat, pals = CAT[c].paliers.slice(0, 6);
+function tableJoueurs(m, liste) {
+  const js = liste || joueursMatch(m), P = liste ? CATE : CAT;
+  const c = S.cat, pals = liste ? P[c].paliers.slice(0, 6) : P[c].paliers.slice(0, 6);
   const l = js.slice().sort((a, b) => b.moy[c] - a.moy[c]).slice(0, 14);
   const cell = p => `<td class="h" style="background:rgba(212,175,55,${(p * 0.55).toFixed(2)});${p >= M.SUR ? 'color:#1A1405;font-weight:700' : ''}">${Math.round(p * 100)}</td>`;
   return segCat('data-fcat') + `<div class="sub">% de chances d'atteindre chaque palier · moy. = moyenne cette saison</div>
@@ -330,11 +379,12 @@ function tableEquipe(g) {
     <p class="note">En %. « Cote ≥ » = cote minimum à viser. Un quart-temps peut finir à égalité : le % « gagne » ne compte pas l'égalité. ${P.faible ? '⚠ Peu de matchs joués par une des équipes : prono moins fiable.' : ''}</p>`;
   return h;
 }
-function ficheEq(g) {
+function ficheEq(g, ouvrirJ) {
   const nba = g.lig.c === 'nba' && S.okJ ? (S.data[jourUS(S.jour)] || { ev: [] }).ev.find(x => String(x.id) === String(g.espnId)) : null;
-  let onglet = 'eq';
-  const corps = () => (nba ? `<div class="seg" style="grid-template-columns:1fr 1fr"><button data-ong="eq" class="${onglet === 'eq' ? 'on' : ''}">Équipes</button><button data-ong="j" class="${onglet === 'j' ? 'on' : ''}">Joueurs</button></div>` : '') +
-    (onglet === 'eq' ? tableEquipe(g) : tableJoueurs(nba));
+  const eu = nba ? [] : joueursEq(g);
+  let onglet = ouvrirJ ? 'j' : 'eq';
+  const corps = () => (nba || eu.length ? `<div class="seg" style="grid-template-columns:1fr 1fr"><button data-ong="eq" class="${onglet === 'eq' ? 'on' : ''}">Équipes</button><button data-ong="j" class="${onglet === 'j' ? 'on' : ''}">Joueurs</button></div>` : '') +
+    (onglet === 'eq' ? tableEquipe(g) : nba ? tableJoueurs(nba) : tableJoueurs(null, eu));
   ouvrir(`<h3>${esc(g.dom)} – ${esc(g.ext)}</h3><div class="sub">${esc(g.lig.nom)} · ${dateCourte(g.date)} · ${heure(g.date)}${g.etat !== 'pre' && g.sd != null ? ' · score ' + g.sd + '-' + g.se : ''}</div><div id="fc">${corps()}</div>`);
   $('#sheet').onclick = e => {
     const o = e.target.closest('[data-ong]'); if (o) { onglet = o.dataset.ong; $('#fc').innerHTML = corps(); return; }
@@ -364,7 +414,9 @@ $('#view').addEventListener('click', e => {
   const p = e.target.closest('[data-pal]'); if (p) { S.pal = +p.dataset.pal; return rendre(); }
   const g = e.target.closest('[data-g]');
   if (g) { const gg = EQ.matchs(S.jour).find(x => x.id === g.dataset.g); if (gg) return ficheEq(gg); }
+  const lj = e.target.closest('[data-ligj]'); if (lj) { S.ligJ = lj.dataset.ligj; S.pal = (S.ligJ === 'NBA' ? CAT : CATE)[S.cat].paliers[2]; return rendre(); }
   const m = e.target.closest('[data-m]');
+  if (m && m.dataset.m.includes(':')) { const gg = EQ.matchs(S.jour).find(x => x.id === m.dataset.m); if (gg) return ficheEq(gg, true); }
   if (m) { const d = S.data[jourUS(S.jour)]; const mm = d && d.ev.find(x => x.id === m.dataset.m); if (mm) ficheMatch(mm); }
 });
 $('#tabs').addEventListener('click', e => {
