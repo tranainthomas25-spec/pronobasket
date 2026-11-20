@@ -9,6 +9,7 @@
     { c: 'bcl', nom: 'Ligue des champions FIBA', src: 'tsdb', id: 4548, h: 3 },
     { c: 'fec', nom: 'FIBA Europe Cup', src: 'tsdb', id: 5607, h: 3 },
     { c: 'lnb', nom: 'Betclic Élite (France)', src: 'tsdb', id: 4423, h: 3 },
+    { c: 'prob', nom: 'Pro B (France)', src: 'tsdb', id: 4577, h: 3 },
     { c: 'bbl', nom: 'BBL (Allemagne)', src: 'tsdb', id: 4441, h: 3 },
     { c: 'acb', nom: 'Liga ACB (Espagne)', src: 'tsdb', id: 4408, h: 3 },
     { c: 'lba', nom: 'Lega Basket (Italie)', src: 'tsdb', id: 4433, h: 3 },
