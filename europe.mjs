@@ -1,7 +1,7 @@
 // Robot GitHub : télécharge les matchs des ligues européennes de basket (TheSportsDB)
 // et les range dans data/europe.json, lu ensuite par l'appli PronoBasket.
 import fs from 'node:fs';
-const LIGUES = { el: 4546, ec: 4547, bcl: 4548, lnb: 4423, bbl: 4441, acb: 4408, lba: 4433 };
+const LIGUES = { el: 4546, ec: 4547, bcl: 4548, fec: 5607, lnb: 4423, bbl: 4441, acb: 4408, lba: 4433 };
 const F = 'data/europe.json';
 let ancien = {}; try { ancien = JSON.parse(fs.readFileSync(F, 'utf8')); } catch (e) { }
 const pause = ms => new Promise(r => setTimeout(r, ms));
